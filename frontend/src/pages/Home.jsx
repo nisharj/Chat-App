@@ -6,7 +6,7 @@ import {
   disconnectSocket,
   sendMessage,
 } from "../services/socket";
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef } from "react";
 
 export default function Home() {
   const {
@@ -23,23 +23,38 @@ export default function Home() {
   } = useChatStore();
   const [input, setInput] = useState("");
   const [newRoom, setNewRoom] = useState("");
+  const [users, setUsers] = useState([]);
   const navigate = useNavigate();
-  const messagesEndRef = useRef(null)
+  const messagesEndRef = useRef(null);
+
+  // load users on start
+  useEffect(() => {
+    api.get("/api/users").then((res) => setUsers(res.data));
+  }, []);
 
   // load rooms on start
   useEffect(() => {
-    api.get("/api/rooms").then((res) => setRooms(res.data));
+    api.get("/api/rooms").then((res) => {
+      const unique = res.data.filter(
+        (room, index, self) =>
+          index === self.findIndex((r) => r.id === room.id),
+      );
+      setRooms(unique);
+    });
   }, []);
 
+  // auto scroll to bottom when messages change
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, [messages])
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-  //ping server every 20s to keep session alive and show online status
+  // ping server every 20s to stay online
   useEffect(() => {
     if (!user) return;
     const ping = () =>
-      api.post(`/api/presence/online?username=${user.username}`);
+      api
+        .post(`/api/presence/online?username=${user.username}`)
+        .catch(() => {});
     ping();
     const interval = setInterval(ping, 20000);
     return () => clearInterval(interval);
@@ -50,7 +65,6 @@ export default function Home() {
     disconnectSocket();
     if (activeRoom) {
       api.get(`/api/messages/${activeRoom.id}`).then((res) => {
-        // normalize REST messages to match WebSocket message format
         const normalized = res.data.map((msg) => ({
           roomId: msg.room?.id,
           senderUsername: msg.sender?.username,
@@ -64,6 +78,31 @@ export default function Home() {
     return () => disconnectSocket();
   }, [activeRoom]);
 
+  // get display name for DM rooms
+  const getRoomDisplayName = (room) => {
+    if (room.group) return `# ${room.name}`;
+    if (room.name?.startsWith("dm_")) {
+      const dmPart = room.name.replace("dm_", "");
+      // find which part is NOT the current user
+      const otherUser = dmPart.startsWith(user?.username + "_")
+        ? dmPart.replace(user?.username + "_", "")
+        : dmPart.replace("_" + user?.username, "");
+      return `💬 ${otherUser}`;
+    }
+    return `# ${room.name}`;
+  };
+
+  const handleDirectMessage = async (targetUsername) => {
+    if (targetUsername === user.username) return;
+    const res = await api.post(
+      `/api/rooms/direct?user1=${user.username}&user2=${targetUsername}`,
+    );
+    setRooms((prev) =>
+      prev.find((r) => r.id === res.data.id) ? prev : [...prev, res.data],
+    );
+    setActiveRoom(res.data);
+  };
+
   const handleSend = () => {
     if (!input.trim() || !activeRoom) return;
 
@@ -74,9 +113,9 @@ export default function Home() {
       sentAt: new Date().toISOString(),
     };
 
-    addMessage(messageDTO)
-    sendMessage(messageDTO)
-    setInput("")
+    // only send via WebSocket — it will echo back and addMessage will be called
+    sendMessage(messageDTO);
+    setInput("");
   };
 
   const handleCreateRoom = async () => {
@@ -90,6 +129,10 @@ export default function Home() {
     logout();
     navigate("/login");
   };
+
+  // separate group rooms and DM rooms
+  const groupRooms = Array.isArray(rooms) ? rooms.filter((r) => r.group) : [];
+  const dmRooms = Array.isArray(rooms) ? rooms.filter((r) => !r.group) : [];
 
   return (
     <div style={styles.container}>
@@ -117,29 +160,75 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Room List */}
+        {/* Group Rooms */}
+        <div style={styles.sectionTitle}>CHANNELS</div>
         <div style={styles.roomList}>
-          {rooms.map((room) => (
+          {groupRooms.map((room) => (
             <div
               key={room.id}
               style={{
                 ...styles.roomItem,
                 background:
-                  activeRoom?.id === room.id ? "#0f3460" : "transparent",
+                  activeRoom?.id === room.id ? "#e3f2fd" : "transparent",
+                color: activeRoom?.id === room.id ? "#2563eb" : "#555",
+                fontWeight: activeRoom?.id === room.id ? "700" : "500",
               }}
               onClick={() => setActiveRoom(room)}
             >
-              # {room.name}
+              {getRoomDisplayName(room)}
             </div>
           ))}
         </div>
+
+        {/* DM Rooms already opened */}
+        {dmRooms.length > 0 && (
+          <>
+            <div style={styles.sectionTitle}>RECENT DMs</div>
+            <div style={styles.roomList}>
+              {dmRooms.map((room) => (
+                <div
+                  key={room.id}
+                  style={{
+                    ...styles.roomItem,
+                    background:
+                      activeRoom?.id === room.id ? "#e3f2fd" : "transparent",
+                    color: activeRoom?.id === room.id ? "#2563eb" : "#555",
+                    fontWeight: activeRoom?.id === room.id ? "700" : "500",
+                  }}
+                  onClick={() => setActiveRoom(room)}
+                >
+                  {getRoomDisplayName(room)}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Users List for new DMs */}
+        <div style={styles.sectionTitle}>DIRECT MESSAGES</div>
+        <div style={styles.roomList}>
+          {users
+            .filter((u) => u.username !== user?.username)
+            .map((u) => (
+              <div
+                key={u.id}
+                style={styles.roomItem}
+                onClick={() => handleDirectMessage(u.username)}
+              >
+                🟢 {u.username}
+              </div>
+            ))}
+        </div>
       </div>
 
-      {/* ChatArea */}
+      {/* Chat Area */}
       <div style={styles.chatArea}>
         {activeRoom ? (
           <>
-            <div style={styles.chatHeader}>#{activeRoom.name}</div>
+            <div style={styles.chatHeader}>
+              {getRoomDisplayName(activeRoom)}
+            </div>
+
             <div style={styles.messages}>
               {(messages || []).map((msg, i) => (
                 <div
@@ -160,15 +249,21 @@ export default function Home() {
                       ...styles.bubble,
                       background:
                         msg.senderUsername === user?.username
-                          ? "#e94560"
-                          : "#0f3460",
+                          ? "#2563eb"
+                          : "#e5e7eb",
+                      color:
+                        msg.senderUsername === user?.username
+                          ? "#fff"
+                          : "#1a1a1a",
                     }}
                   >
                     {msg.content}
                   </div>
                 </div>
               ))}
+              <div ref={messagesEndRef} />
             </div>
+
             <div style={styles.inputArea}>
               <input
                 style={styles.messageInput}
@@ -178,14 +273,13 @@ export default function Home() {
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
               />
               <button style={styles.sendBtn} onClick={handleSend}>
-                S end
+                Send
               </button>
             </div>
           </>
         ) : (
           <div style={styles.noRoom}>👈 Select a room to start chatting</div>
         )}
-      <div ref={messagesEndRef} />
       </div>
     </div>
   );
@@ -195,126 +289,179 @@ const styles = {
   container: {
     display: "flex",
     height: "100vh",
-    background: "#1a1a2e",
-    color: "#fff",
+    background: "#f5f7fa",
+    color: "#1a1a1a",
+    fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
   },
   sidebar: {
-    width: "260px",
-    background: "#16213e",
+    width: "280px",
+    background: "#fff",
     display: "flex",
     flexDirection: "column",
-    borderRight: "1px solid #0f3460",
+    borderRight: "1px solid #e0e0e0",
+    overflowY: "auto",
+    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.05)",
   },
   sidebarHeader: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "16px",
-    borderBottom: "1px solid #0f3460",
+    padding: "20px 16px",
+    borderBottom: "1px solid #f0f0f0",
+    background: "#fff",
   },
-  logo: { color: "#e94560", fontWeight: "bold", fontSize: "16px" },
+  logo: {
+    color: "#2563eb",
+    fontWeight: "700",
+    fontSize: "18px",
+    letterSpacing: "-0.5px",
+  },
   logoutBtn: {
-    background: "transparent",
-    border: "1px solid #e94560",
-    color: "#e94560",
-    padding: "4px 10px",
+    background: "#fff",
+    border: "1.5px solid #e91e63",
+    color: "#e91e63",
+    padding: "6px 12px",
     borderRadius: "6px",
     cursor: "pointer",
     fontSize: "12px",
+    fontWeight: "600",
+    transition: "all 0.3s ease",
   },
   userInfo: {
-    padding: "10px 16px",
-    color: "#aaa",
+    padding: "14px 16px",
+    color: "#666",
     fontSize: "13px",
-    borderBottom: "1px solid #0f3460",
+    fontWeight: "500",
+    borderBottom: "1px solid #f0f0f0",
+    background: "#fafafa",
   },
-  createRoom: { display: "flex", padding: "12px", gap: "8px" },
+  createRoom: {
+    display: "flex",
+    padding: "14px",
+    gap: "8px",
+    background: "#fff",
+  },
   roomInput: {
     flex: 1,
-    padding: "8px",
-    background: "#0f3460",
-    border: "none",
-    borderRadius: "6px",
-    color: "#fff",
+    padding: "10px 12px",
+    background: "#f5f7fa",
+    border: "1.5px solid #e0e0e0",
+    borderRadius: "8px",
+    color: "#1a1a1a",
     fontSize: "13px",
+    transition: "all 0.3s ease",
+    fontWeight: "500",
   },
   createBtn: {
-    padding: "8px 12px",
-    background: "#e94560",
+    padding: "10px 14px",
+    background: "#2563eb",
     border: "none",
-    borderRadius: "6px",
+    borderRadius: "8px",
     color: "#fff",
     cursor: "pointer",
-    fontSize: "16px",
+    fontSize: "18px",
+    fontWeight: "600",
+    transition: "all 0.3s ease",
   },
-  roomList: { flex: 1, overflowY: "auto", padding: "8px" },
+  sectionTitle: {
+    padding: "12px 16px 8px",
+    fontSize: "11px",
+    color: "#999",
+    letterSpacing: "0.5px",
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  roomList: { padding: "6px 8px" },
   roomItem: {
-    padding: "10px 14px",
+    padding: "12px 14px",
     borderRadius: "8px",
     cursor: "pointer",
-    marginBottom: "4px",
+    marginBottom: "6px",
     fontSize: "14px",
-    color: "#ccc",
+    color: "#555",
+    fontWeight: "500",
+    transition: "all 0.2s ease",
   },
-  chatArea: { flex: 1, display: "flex", flexDirection: "column" },
+  chatArea: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    background: "#fff",
+  },
   chatHeader: {
-    padding: "16px 20px",
-    background: "#16213e",
-    borderBottom: "1px solid #0f3460",
-    fontWeight: "bold",
+    padding: "18px 24px",
+    background: "#fff",
+    borderBottom: "1px solid #e0e0e0",
+    fontWeight: "700",
     fontSize: "16px",
+    color: "#1a1a1a",
   },
   messages: {
     flex: 1,
     overflowY: "auto",
-    padding: "20px",
+    padding: "24px",
     display: "flex",
     flexDirection: "column",
-    gap: "8px",
+    gap: "12px",
+    background: "#f9fafb",
   },
-  message: { display: "flex", flexDirection: "column", maxWidth: "60%" },
+  message: {
+    display: "flex",
+    flexDirection: "column",
+    maxWidth: "65%",
+    animation: "fadeIn 0.3s ease",
+  },
   sender: {
-    fontSize: "11px",
-    color: "#aaa",
-    marginBottom: "2px",
+    fontSize: "12px",
+    color: "#666",
+    marginBottom: "4px",
     paddingLeft: "4px",
+    fontWeight: "600",
   },
   bubble: {
-    padding: "10px 14px",
+    padding: "12px 16px",
     borderRadius: "12px",
     fontSize: "14px",
-    lineHeight: "1.4",
+    lineHeight: "1.5",
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.08)",
+    wordWrap: "break-word",
   },
   inputArea: {
     display: "flex",
-    padding: "16px",
-    gap: "10px",
-    borderTop: "1px solid #0f3460",
+    padding: "18px 24px",
+    gap: "12px",
+    borderTop: "1px solid #e0e0e0",
+    background: "#fff",
   },
   messageInput: {
     flex: 1,
-    padding: "12px",
-    background: "#0f3460",
-    border: "none",
+    padding: "12px 14px",
+    background: "#f5f7fa",
+    border: "1.5px solid #e0e0e0",
     borderRadius: "8px",
-    color: "#fff",
+    color: "#1a1a1a",
     fontSize: "14px",
+    transition: "all 0.3s ease",
+    fontWeight: "500",
   },
   sendBtn: {
-    padding: "12px 24px",
-    background: "#e94560",
+    padding: "12px 28px",
+    background: "#2563eb",
     border: "none",
     borderRadius: "8px",
     color: "#fff",
     cursor: "pointer",
-    fontWeight: "bold",
+    fontWeight: "700",
+    transition: "all 0.3s ease",
+    fontSize: "14px",
   },
   noRoom: {
     flex: 1,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    color: "#aaa",
+    color: "#999",
     fontSize: "18px",
+    fontWeight: "500",
   },
 };
