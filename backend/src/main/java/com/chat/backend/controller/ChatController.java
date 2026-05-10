@@ -26,6 +26,16 @@ public class ChatController {
 
     @MessageMapping("/chat.send")
     public void sendMessage(@Payload MessageDTO messageDTO) {
+        if ("TYPING".equalsIgnoreCase(messageDTO.getType())
+                || "STOP_TYPING".equalsIgnoreCase(messageDTO.getType())) {
+            messagingTemplate.convertAndSend("/topic/room/" + messageDTO.getRoomId(), messageDTO);
+            return;
+        }
+
+        if (messageDTO.getContent() == null || messageDTO.getContent().isBlank()) {
+            return;
+        }
+
         ChatRoom room = chatRoomRepository.findById(messageDTO.getRoomId())
                 .orElseThrow(() -> new RuntimeException("Room not found"));
 
@@ -39,6 +49,7 @@ public class ChatController {
         message.setSentAt(LocalDateTime.now());
         messageRepository.save(message);
 
+        messageDTO.setType("CHAT");
         messageDTO.setSentAt(message.getSentAt());
         messagingTemplate.convertAndSend("/topic/room/" + messageDTO.getRoomId(), messageDTO);
     }

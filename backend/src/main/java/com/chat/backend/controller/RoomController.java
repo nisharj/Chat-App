@@ -7,7 +7,9 @@ import com.chat.backend.repository.ChatRoomRepository;
 import com.chat.backend.repository.MessageRepository;
 import com.chat.backend.repository.UserRepository;
 import com.chat.backend.service.PresenceService;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -69,4 +71,26 @@ public class RoomController {
                     return chatRoomRepository.save(room);
                 });
     }
+
+
+    @Transactional
+    @DeleteMapping("/api/rooms/{roomId}")
+    public ResponseEntity<Void> deleteRoom(@PathVariable UUID roomId){
+        if(!chatRoomRepository.existsById(roomId)) return ResponseEntity.notFound().build();
+
+        messageRepository.deleteByRoomId(roomId);
+        chatRoomRepository.deleteById(roomId);
+
+        return ResponseEntity.noContent().build();
+    }
+
+    @Transactional
+    @DeleteMapping("/api/rooms/{roomId}/message")
+    public ResponseEntity<Void> clearMessage(@PathVariable UUID roomId){
+        if(!chatRoomRepository.existsById(roomId)) return ResponseEntity.notFound().build();
+
+        messageRepository.deleteByRoomId(roomId);
+        return ResponseEntity.noContent().build();
+    }
+
 }
