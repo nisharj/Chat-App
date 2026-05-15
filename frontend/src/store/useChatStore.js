@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { create } from 'zustand'
 
 const useChatStore = create((set, get) => ({
