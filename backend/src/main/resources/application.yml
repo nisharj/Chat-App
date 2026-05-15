@@ -20,7 +20,15 @@ spring:
     redis:
       host: localhost
       port: 6379
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 20MB
+      max-request-size: 22MB
 
 jwt:
   secret: qwgfggu745575094uythergfe@$%(#y343uutghu4t@!
   expiration: 86400000
+
+file:
+  upload-dir: uploads
