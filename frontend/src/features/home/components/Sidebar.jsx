@@ -1,10 +1,16 @@
 import { useState } from "react";
 import { FaUser, FaEnvelope, FaPlus } from "react-icons/fa";
-import { HiUserGroup, HiChatBubbleLeftRight, HiTrash } from "react-icons/hi2";
+import {
+  HiUserGroup,
+  HiChatBubbleLeftRight,
+  HiTrash,
+  HiXMark,
+} from "react-icons/hi2";
 
 export default function Sidebar({
   user,
   activeRoom,
+  isOpen,
   newRoom,
   setNewRoom,
   users,
@@ -15,9 +21,9 @@ export default function Sidebar({
   onDeleteRoom,
   onSelectRoom,
   onOpenDirectMessage,
+  onClose,
   onLogout,
 }) {
-  
   const [hoveredRoom, setHoveredRoom] = useState(null);
 
   // Display room name
@@ -44,7 +50,7 @@ export default function Sidebar({
       <div onClick={() => onSelectRoom(room)}
         onMouseEnter={() => setHoveredRoom(room.id)}
         onMouseLeave={() => setHoveredRoom(null)}
-        className={`flex items-center justify-between px-4 py-2 rounded-lg cursor-pointer mb-1 ransition-color ${isActive ? "bg-blue-100 text-blue-600 font-semibold" : "text-gray-600 hover:bg-gray-100"}`}
+        className={`mb-1 flex cursor-pointer items-center justify-between rounded-lg px-4 py-2 transition-colors ${isActive ? "bg-blue-100 font-semibold text-blue-600" : "text-gray-600 hover:bg-gray-100"}`}
       >
         <span className="flex items-center gap-2 truncate">
           {icon} {getRoomDisplayName(room)}
@@ -67,38 +73,50 @@ export default function Sidebar({
   };
 
   return (
-    <div className="w-72 bg-white border-r border-gray-200 flex flex-col overflow-y-auto shadow-sm">
-      
+    <aside
+      className={`fixed inset-y-0 left-0 z-40 flex w-[min(20rem,85vw)] max-w-full flex-col overflow-y-auto border-r border-gray-200 bg-white shadow-xl transition-transform duration-300 lg:static lg:z-0 lg:w-72 lg:translate-x-0 lg:shadow-sm ${
+        isOpen ? "translate-x-0" : "-translate-x-full"
+      }`}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-5 border-b border-gray-100">
+      <div className="flex items-center justify-between border-b border-gray-100 px-4 py-5">
         <span className="text-blue-600 font-bold text-lg">
           <HiChatBubbleLeftRight className="inline mr-2" /> ChatApp
         </span>
 
-        {/* <button */}
-        <button
-          onClick={onLogout}
-          className="group relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-md border border-pink-500 bg-transparent text-pink-500 shadow-sm transition-all duration-300 hover:w-16 hover:bg-pink-100 active:translate-x-[2px] active:translate-y-[2px]"
-        >
-        
-          <div className="absolute left-2 flex items-center justify-center transition-transform duration-300 group-hover:-translate-x-1">
-            <svg
-              viewBox="0 0 512 512"
-              className="h-3 w-3 fill-current"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path d="M377.9 105.9L500.7 228.7c7.2 7.2 11.3 17.1 11.3 27.3s-4.1 20.1-11.3 27.3L377.9 406.1c-6.4 6.4-15 9.9-24 9.9c-18.7 0-33.9-15.2-33.9-33.9v-62.1h-128c-17.7 0-32-14.3-32-32v-64c0-17.7 14.3-32 32-32h128v-62.1c0-18.7 15.2-33.9 33.9-33.9c9 0 17.6 3.6 24 9.9zM160 96H96c-17.7 0-32 14.3-32 32v256c0 17.7 14.3 32 32 32h64c17.7 0 32 14.3 32 32s-14.3 32-32 32H96C43 480 0 437 0 384V128C0 75 43 32 96 32h64c17.7 0 32 14.3 32 32s-14.3 32-32 32z" />
-            </svg>
-          </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close sidebar"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-slate-500 hover:bg-gray-100 lg:hidden"
+          >
+            <HiXMark className="text-lg" />
+          </button>
 
-          <span className="absolute left-6 w-0 overflow-hidden whitespace-nowrap opacity-0 text-[10px] font-semibold transition-all duration-300 group-hover:w-10 group-hover:opacity-100">
-            Logout
-          </span>
-        </button>
+          <button
+            onClick={onLogout}
+            className="group relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-md border border-pink-500 bg-transparent text-pink-500 shadow-sm transition-all duration-300 hover:w-16 hover:bg-pink-100 active:translate-x-[2px] active:translate-y-[2px]"
+          >
+            <div className="absolute left-2 flex items-center justify-center transition-transform duration-300 group-hover:-translate-x-1">
+              <svg
+                viewBox="0 0 512 512"
+                className="h-3 w-3 fill-current"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path d="M377.9 105.9L500.7 228.7c7.2 7.2 11.3 17.1 11.3 27.3s-4.1 20.1-11.3 27.3L377.9 406.1c-6.4 6.4-15 9.9-24 9.9c-18.7 0-33.9-15.2-33.9-33.9v-62.1h-128c-17.7 0-32-14.3-32-32v-64c0-17.7 14.3-32 32-32h128v-62.1c0-18.7 15.2-33.9 33.9-33.9c9 0 17.6 3.6 24 9.9zM160 96H96c-17.7 0-32 14.3-32 32v256c0 17.7 14.3 32 32 32h64c17.7 0 32 14.3 32 32s-14.3 32-32 32H96C43 480 0 437 0 384V128C0 75 43 32 96 32h64c17.7 0 32 14.3 32 32s-14.3 32-32 32z" />
+              </svg>
+            </div>
+
+            <span className="absolute left-6 w-0 overflow-hidden whitespace-nowrap text-[10px] font-semibold opacity-0 transition-all duration-300 group-hover:w-10 group-hover:opacity-100">
+              Logout
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* User Info */}
-      <div className="px-4 py-3 text-sm text-gray-600 bg-gray-50 border-b border-gray-100">
+      <div className="border-b border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-600">
         <FaUser className="inline mr-2" /> {user?.username}
       </div>
 
@@ -168,6 +186,6 @@ export default function Sidebar({
             </div>
           ))}
       </div>
-    </div>
+    </aside>
   );
 }

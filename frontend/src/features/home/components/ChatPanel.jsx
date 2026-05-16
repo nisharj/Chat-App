@@ -2,6 +2,7 @@ import { FaEnvelope } from "react-icons/fa";
 import {
   HiArchiveBox,
   HiArrowDownTray,
+  HiBars3,
   HiDocumentText,
   HiPaperClip,
   HiPhoto,
@@ -30,6 +31,7 @@ export default function ChatPanel({
   onFileCaptionChange,
   onRemoveFile,
   onUploadFile,
+  onOpenSidebar,
 }) {
   const formatTime = (sentAt) => {
     if (!sentAt) return "";
@@ -203,29 +205,58 @@ export default function ChatPanel({
 
   if (!activeRoom) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-400 text-lg font-medium">
-        Select a room to start chatting
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
+        <div className="flex items-center gap-3 border-b border-gray-200 px-4 py-4 sm:px-6">
+          <button
+            type="button"
+            onClick={onOpenSidebar}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-slate-700 hover:bg-gray-100 lg:hidden"
+            aria-label="Open sidebar"
+          >
+            <HiBars3 className="text-xl" />
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <div className="text-base font-bold text-slate-900">ChatApp</div>
+            <div className="text-sm text-slate-500">Select a room to start chatting</div>
+          </div>
+        </div>
+
+        <div className="flex flex-1 items-center justify-center px-6 text-center text-lg font-medium text-gray-400">
+          Select a room to start chatting
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-white">
-      <div className="px-6 py-4 border-b border-gray-200 font-bold text-base">
-        {activeRoom.group ? (
-          <>
-            <HiUserGroup className="inline mr-2" />
-            {getRoomDisplayName(activeRoom)}
-          </>
-        ) : (
-          <>
-            <FaEnvelope className="inline mr-2" />
-            {getRoomDisplayName(activeRoom)}
-          </>
-        )}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
+      <div className="flex items-center gap-3 border-b border-gray-200 px-4 py-4 sm:px-6">
+        <button
+          type="button"
+          onClick={onOpenSidebar}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-slate-700 hover:bg-gray-100 lg:hidden"
+          aria-label="Open sidebar"
+        >
+          <HiBars3 className="text-xl" />
+        </button>
+
+        <div className="min-w-0 flex-1 truncate font-bold text-base">
+          {activeRoom.group ? (
+            <>
+              <HiUserGroup className="mr-2 inline" />
+              {getRoomDisplayName(activeRoom)}
+            </>
+          ) : (
+            <>
+              <FaEnvelope className="mr-2 inline" />
+              {getRoomDisplayName(activeRoom)}
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-3 bg-gray-50">
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto bg-gray-50 p-4 sm:p-6">
         {(messages || []).map((message) => {
           const isOwn = message.senderUsername === user?.username;
           const isTextMessage = message.kind === "text";
@@ -233,7 +264,7 @@ export default function ChatPanel({
           return (
             <div
               key={message.clientKey}
-              className={`max-w-[75%] ${isOwn ? "self-end" : "self-start"}`}
+              className={`max-w-[88%] sm:max-w-[75%] ${isOwn ? "self-end" : "self-start"}`}
             >
               <div
                 className={`rounded-2xl px-4 py-3 shadow-sm ${
@@ -268,11 +299,11 @@ export default function ChatPanel({
       </div>
 
       {typingLabel && (
-        <div className="px-6 py-2 text-sm text-gray-500">{typingLabel}</div>
+        <div className="px-4 py-2 text-sm text-gray-500 sm:px-6">{typingLabel}</div>
       )}
 
       {selectedFile && (
-        <div className="border-t border-gray-200 bg-white px-6 pt-4">
+        <div className="border-t border-gray-200 bg-white px-4 pt-4 sm:px-6">
           <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
@@ -332,7 +363,7 @@ export default function ChatPanel({
         </div>
       )}
 
-      <div className="flex gap-3 px-6 py-4 border-t border-gray-200 bg-white">
+      <div className="flex flex-col gap-3 border-t border-gray-200 bg-white px-4 py-4 sm:flex-row sm:px-6">
         <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-slate-600 hover:bg-gray-100">
           <input
             type="file"
@@ -350,12 +381,12 @@ export default function ChatPanel({
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={(event) => event.key === "Enter" && onSend()}
-          className="flex-1 px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
 
         <button
           onClick={onSend}
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+          className="w-full rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white hover:bg-blue-700 sm:w-auto"
         >
           Send
         </button>
