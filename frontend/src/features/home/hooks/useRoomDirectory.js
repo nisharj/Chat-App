@@ -38,7 +38,7 @@ export default function useRoomDirectory({
     };
     
     fetchRooms();
-  },[]);
+  }, [setRooms]);
 
   // ── Poll Online Presence Every 15 Seconds ────────────────────────────────
   useEffect(() => {

@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars */
 import { create } from 'zustand'
+import { sortAndDeduplicateMessages } from '../utils/chatMessages'
 
 const useChatStore = create((set, get) => ({
   user: JSON.parse(localStorage.getItem('user')) || null,
@@ -21,9 +22,9 @@ const useChatStore = create((set, get) => ({
 
   setRooms: (rooms) => set({ rooms }),
   setActiveRoom: (room) => set({ activeRoom: room, messages: [] }),
-  setMessages: (messages) => set({ messages }),
+  setMessages: (messages) => set({ messages: sortAndDeduplicateMessages(messages) }),
   addMessage: (message) => set((state) => ({
-    messages: [...(state.messages || []), message]
+    messages: sortAndDeduplicateMessages([...(state.messages || []), message])
   })),
 }))
 

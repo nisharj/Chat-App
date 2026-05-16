@@ -19,6 +19,7 @@ import java.util.Map;
 @RequestMapping("/api/files")
 @RequiredArgsConstructor
 @Slf4j
+@CrossOrigin(origins = "*")
 public class FileUploadController {
 
     private final FileStorageService     storageService;

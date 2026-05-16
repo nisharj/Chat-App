@@ -10,8 +10,46 @@ import ChatPanel from "../features/home/components/ChatPanel";
 import useRoomDirectory from "../features/home/hooks/useRoomDirectory";
 import useChatSession from "../features/home/hooks/useChatSesssion";
 
+function RoomChatPanel({
+  user,
+  token,
+  activeRoom,
+  messages,
+  setMessages,
+  addMessage,
+}) {
+  const chatSession = useChatSession({
+    user,
+    token,
+    activeRoom,
+    messages,
+    setMessages,
+    addMessage,
+  });
+
+  return (
+    <ChatPanel
+      user={user}
+      activeRoom={activeRoom}
+      messages={messages}
+      messagesEndRef={chatSession.messagesEndRef}
+      typingLabel={chatSession.typingLabel}
+      input={chatSession.input}
+      onInputChange={chatSession.handleInputChange}
+      onSend={chatSession.sendCurrentMessage}
+      selectedFile={chatSession.selectedFile}
+      fileCaption={chatSession.fileCaption}
+      uploadError={chatSession.uploadError}
+      isUploading={chatSession.isUploading}
+      onFileSelect={chatSession.handleFileSelect}
+      onFileCaptionChange={chatSession.setFileCaption}
+      onRemoveFile={chatSession.removeSelectedFile}
+      onUploadFile={chatSession.uploadSelectedFile}
+    />
+  );
+}
+
 export default function Home() {
-  // ── Zustand Store ────────────────────────────────────────────────────────
   const {
     user,
     token,
@@ -27,7 +65,6 @@ export default function Home() {
 
   const navigate = useNavigate();
 
-  // ── Room / User Management Hook ──────────────────────────────────────────
   const roomDirectory = useRoomDirectory({
     user,
     rooms,
@@ -37,17 +74,6 @@ export default function Home() {
     setMessages,
   });
 
-  // ── Chat Session Hook ────────────────────────────────────────────────────
-  const chatSession = useChatSession({
-    user,
-    token,
-    activeRoom,
-    messages,
-    setMessages,
-    addMessage,
-  });
-
-  // ── Keep Current User Presence Alive ─────────────────────────────────────
   useEffect(() => {
     if (!user) return;
 
@@ -56,25 +82,20 @@ export default function Home() {
         .post(`/api/presence/online?username=${user.username}`)
         .catch(() => {});
 
-    // Ping immediately
     ping();
 
-    // Ping every 20 seconds
     const interval = setInterval(ping, 20000);
 
     return () => clearInterval(interval);
   }, [user]);
 
-  // ── Logout Handler ───────────────────────────────────────────────────────
   const handleLogout = () => {
     logout();
     navigate("/login");
   };
 
-  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen bg-gray-100 text-gray-900">
-      {/* Sidebar */}
       <Sidebar
         user={user}
         activeRoom={activeRoom}
@@ -86,16 +107,14 @@ export default function Home() {
         {...roomDirectory}
       />
 
-      {/* Chat Panel */}
-      <ChatPanel
+      <RoomChatPanel
+        key={activeRoom?.id ?? "no-room"}
         user={user}
+        token={token}
         activeRoom={activeRoom}
         messages={messages}
-        messagesEndRef={chatSession.messagesEndRef}
-        typingLabel={chatSession.typingLabel}
-        input={chatSession.input}
-        onInputChange={chatSession.handleInputChange}
-        onSend={chatSession.sendCurrentMessage}
+        setMessages={setMessages}
+        addMessage={addMessage}
       />
     </div>
   );

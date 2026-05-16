@@ -1,7 +1,12 @@
-/* eslint-disable react-hooks/immutability */
 import { useEffect, useRef, useState } from "react";
 import api from "../../../services/api";
 import { connectSocket, disconnectSocket, sendMessage } from "../../../services/socket";
+import {
+  mergeTimelineMessages,
+  normalizeFileMessage,
+  normalizeTextHistoryMessage,
+  normalizeTextSocketMessage,
+} from "../../../utils/chatMessages";
 
 export default function useChatSession({
   user,
@@ -11,118 +16,29 @@ export default function useChatSession({
   setMessages,
   addMessage,
 }) {
-  // ── Local State ──────────────────────────────────────────────────────────
   const [input, setInput] = useState("");
-  const [typingUsers, setTypingUsers] = useState({}); // { [roomId]: Set<username> }
+  const [typingUsers, setTypingUsers] = useState({});
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [fileCaption, setFileCaption] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
 
-  // ── Refs ─────────────────────────────────────────────────────────────────
   const messagesEndRef = useRef(null);
   const typingTimers = useRef({});
   const localTypingTimer = useRef(null);
   const isTypingRef = useRef(false);
+  const stopTypingRef = useRef(() => {});
 
-  // ── Auto Scroll to Latest Message ────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth",
     });
   }, [messages]);
 
-  // ── WebSocket + Message History ──────────────────────────────────────────
-  useEffect(() => {
-    // Disconnect previous socket
-    disconnectSocket();
-
-    // If no room selected, do nothing
-    if (!activeRoom) return;
-
-    // Load message history
-    api.get(`/api/messages/${activeRoom.id}`).then((res) => {
-      setMessages(
-        res.data.map((msg) => ({
-          roomId: msg.room?.id,
-          senderUsername: msg.sender?.username,
-          content: msg.content,
-          sentAt: msg.sentAt,
-        }))
-      );
-    });
-
-    // Connect socket
-    connectSocket(
-      token,
-      (msg) => {
-        // User is typing
-        if (msg.type === "TYPING") {
-          if (msg.senderUsername === user?.username) return;
-
-          // Add user to typing set
-          setTypingUsers((prev) => {
-            const typers = new Set(prev[msg.roomId] || []);
-            typers.add(msg.senderUsername);
-            return {
-              ...prev,
-              [msg.roomId]: typers,
-            };
-          });
-
-          // Auto-remove after 3 seconds
-          const key = `${msg.roomId}_${msg.senderUsername}`;
-
-          clearTimeout(typingTimers.current[key]);
-
-          typingTimers.current[key] = setTimeout(() => {
-            setTypingUsers((prev) => {
-              const typers = new Set(prev[msg.roomId] || []);
-              typers.delete(msg.senderUsername);
-
-              return {
-                ...prev,
-                [msg.roomId]: typers,
-              };
-            });
-          }, 2000);
-        }
-
-        // User stopped typing
-        else if (msg.type === "STOP_TYPING") {
-          if (msg.senderUsername === user?.username) return;
-
-          const key = `${msg.roomId}_${msg.senderUsername}`;
-          clearTimeout(typingTimers.current[key]);
-
-          setTypingUsers((prev) => {
-            const typers = new Set(prev[msg.roomId] || []);
-            typers.delete(msg.senderUsername);
-
-            return {
-              ...prev,
-              [msg.roomId]: typers,
-            };
-          });
-        }
-
-        // Normal chat message
-        else {
-          addMessage(msg);
-        }
-      },
-      activeRoom.id
-    );
-
-    // Cleanup when room changes or component unmounts
-    return () => {
-      stopTyping(activeRoom.id);
-      clearTimeout(localTypingTimer.current);
-      disconnectSocket();
-    };
-  }, [activeRoom]);
-
-  // ── Stop Typing ──────────────────────────────────────────────────────────
   const stopTyping = (roomId = activeRoom?.id) => {
     clearTimeout(localTypingTimer.current);
 
-    if (!roomId || !isTypingRef.current) return;
+    if (!roomId || !isTypingRef.current || !user?.username) return;
 
     sendMessage({
       type: "STOP_TYPING",
@@ -133,15 +49,138 @@ export default function useChatSession({
     isTypingRef.current = false;
   };
 
-  // ── Handle Input Change ──────────────────────────────────────────────────
+  useEffect(() => {
+    stopTypingRef.current = stopTyping;
+  });
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    disconnectSocket();
+
+    if (!activeRoom) return undefined;
+
+    const loadRoomTimeline = async () => {
+      try {
+        const [textHistoryResult, fileHistoryResult] = await Promise.allSettled([
+          api.get(`/api/messages/${activeRoom.id}`),
+          api.get(`/api/files/history/${activeRoom.id}`),
+        ]);
+
+        if (isCancelled) return;
+
+        const textHistory =
+          textHistoryResult.status === "fulfilled"
+            ? (textHistoryResult.value.data ?? []).map(normalizeTextHistoryMessage)
+            : [];
+
+        const fileHistory =
+          fileHistoryResult.status === "fulfilled"
+            ? (fileHistoryResult.value.data ?? []).map(normalizeFileMessage)
+            : [];
+
+        if (textHistoryResult.status === "rejected") {
+          console.error("Failed to load text history:", textHistoryResult.reason);
+        }
+
+        if (fileHistoryResult.status === "rejected") {
+          console.error("Failed to load file history:", fileHistoryResult.reason);
+        }
+
+        const timeline = mergeTimelineMessages(
+          textHistory,
+          fileHistory
+        );
+
+        setMessages(timeline);
+      } catch (error) {
+        if (isCancelled) return;
+
+        console.error("Failed to load room timeline:", error);
+        setMessages([]);
+      }
+    };
+
+    loadRoomTimeline();
+
+    connectSocket(
+      token,
+      {
+        onRoomMessage: (message) => {
+          if (message.type === "TYPING") {
+            if (message.senderUsername === user?.username) return;
+
+            setTypingUsers((prev) => {
+              const typers = new Set(prev[message.roomId] || []);
+              typers.add(message.senderUsername);
+
+              return {
+                ...prev,
+                [message.roomId]: typers,
+              };
+            });
+
+            const key = `${message.roomId}_${message.senderUsername}`;
+
+            clearTimeout(typingTimers.current[key]);
+
+            typingTimers.current[key] = setTimeout(() => {
+              setTypingUsers((prev) => {
+                const typers = new Set(prev[message.roomId] || []);
+                typers.delete(message.senderUsername);
+
+                return {
+                  ...prev,
+                  [message.roomId]: typers,
+                };
+              });
+            }, 2000);
+
+            return;
+          }
+
+          if (message.type === "STOP_TYPING") {
+            if (message.senderUsername === user?.username) return;
+
+            const key = `${message.roomId}_${message.senderUsername}`;
+            clearTimeout(typingTimers.current[key]);
+
+            setTypingUsers((prev) => {
+              const typers = new Set(prev[message.roomId] || []);
+              typers.delete(message.senderUsername);
+
+              return {
+                ...prev,
+                [message.roomId]: typers,
+              };
+            });
+
+            return;
+          }
+
+          addMessage(normalizeTextSocketMessage(message));
+        },
+        onFileMessage: (message) => {
+          addMessage(normalizeFileMessage(message));
+        },
+      },
+      activeRoom.id
+    );
+
+    return () => {
+      isCancelled = true;
+      stopTypingRef.current(activeRoom.id);
+      clearTimeout(localTypingTimer.current);
+      disconnectSocket();
+    };
+  }, [activeRoom, token, user?.username, setMessages, addMessage]);
+
   const handleInputChange = (value) => {
     setInput(value);
 
-    if (!activeRoom) return;
-
+    if (!activeRoom || !user?.username) return;
     if (!value.trim() && !isTypingRef.current) return;
 
-    // Send TYPING event
     sendMessage({
       type: "TYPING",
       roomId: activeRoom.id,
@@ -150,7 +189,6 @@ export default function useChatSession({
 
     isTypingRef.current = true;
 
-    // Reset timer
     clearTimeout(localTypingTimer.current);
 
     localTypingTimer.current = setTimeout(() => {
@@ -158,15 +196,58 @@ export default function useChatSession({
     }, 2000);
   };
 
-  // ── Send Message ─────────────────────────────────────────────────────────
+  const handleFileSelect = (file) => {
+    if (!file) return;
+
+    setSelectedFile(file);
+    setUploadError("");
+  };
+
+  const removeSelectedFile = () => {
+    if (isUploading) return;
+
+    setSelectedFile(null);
+    setFileCaption("");
+    setUploadError("");
+  };
+
+  const uploadSelectedFile = async () => {
+    if (!selectedFile || !activeRoom || !user?.username || isUploading) return;
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+    formData.append("chatRoomId", activeRoom.id);
+    formData.append("sender", user.username);
+
+    if (fileCaption.trim()) {
+      formData.append("caption", fileCaption.trim());
+    }
+
+    setIsUploading(true);
+    setUploadError("");
+
+    try {
+      await api.post("/api/files/upload", formData);
+      setSelectedFile(null);
+      setFileCaption("");
+    } catch (error) {
+      const message =
+        error?.response?.data?.error ?? "Upload failed. Please try again.";
+
+      setUploadError(message);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const sendCurrentMessage = () => {
-    if (!input.trim() || !activeRoom) return;
+    if (!input.trim() || !activeRoom || !user?.username) return;
 
     sendMessage({
       type: "CHAT",
       roomId: activeRoom.id,
       senderUsername: user.username,
-      content: input,
+      content: input.trim(),
       sentAt: new Date().toISOString(),
     });
 
@@ -174,7 +255,6 @@ export default function useChatSession({
     setInput("");
   };
 
-  // ── Derived Typing Label ─────────────────────────────────────────────────
   const currentTypers = activeRoom
     ? [...(typingUsers[activeRoom.id] || [])]
     : [];
@@ -183,16 +263,23 @@ export default function useChatSession({
     currentTypers.length === 1
       ? `${currentTypers[0]} is typing...`
       : currentTypers.length > 1
-      ? `${currentTypers.join(", ")} are typing...`
-      : null;
+        ? `${currentTypers.join(", ")} are typing...`
+        : null;
 
-  // ── Return Hook Data ─────────────────────────────────────────────────────
   return {
     input,
     setInput,
     messagesEndRef,
     typingLabel,
+    selectedFile,
+    fileCaption,
+    isUploading,
+    uploadError,
     handleInputChange,
+    handleFileSelect,
+    setFileCaption,
+    removeSelectedFile,
+    uploadSelectedFile,
     sendCurrentMessage,
   };
 }
