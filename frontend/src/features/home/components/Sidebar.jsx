@@ -17,6 +17,7 @@ export default function Sidebar({
   onlineUsers,
   groupRooms,
   dmRooms,
+  directoryError,
   onCreateRoom,
   onDeleteRoom,
   onSelectRoom,
@@ -45,6 +46,7 @@ export default function Sidebar({
   const RoomItem = ({ room, icon }) => {
     const isActive = activeRoom?.id === room.id;
     const isHovered = hoveredRoom === room.id;
+    const canDelete = Boolean(room?.canManage);
 
     return (
       <div onClick={() => onSelectRoom(room)}
@@ -56,7 +58,7 @@ export default function Sidebar({
           {icon} {getRoomDisplayName(room)}
         </span>
 
-        {isHovered && (
+        {isHovered && canDelete && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -119,6 +121,12 @@ export default function Sidebar({
       <div className="border-b border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-600">
         <FaUser className="inline mr-2" /> {user?.username}
       </div>
+
+      {directoryError && (
+        <div className="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {directoryError}
+        </div>
+      )}
 
       {/* Create Room */}
       <div className="p-4 flex gap-2">

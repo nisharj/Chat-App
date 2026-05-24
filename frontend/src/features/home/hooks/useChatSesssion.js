@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import api from "../../../services/api";
-import { connectSocket, disconnectSocket, sendMessage } from "../../../services/socket";
+import { useEffect, useMemo, useRef, useState } from "react";
+import api, {
+  getApiErrorMessage,
+  isForbiddenError,
+} from "../../../services/api";
+import {
+  connectSocket,
+  disconnectSocket,
+  sendMessage,
+} from "../../../services/socket";
 import {
   mergeTimelineMessages,
   normalizeFileMessage,
@@ -15,6 +22,7 @@ export default function useChatSession({
   messages,
   setMessages,
   addMessage,
+  applyDeleteEvent,
 }) {
   const [input, setInput] = useState("");
   const [typingUsers, setTypingUsers] = useState({});
@@ -22,6 +30,9 @@ export default function useChatSession({
   const [fileCaption, setFileCaption] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [chatError, setChatError] = useState("");
+  const [selectedMessages, setSelectedMessages] = useState([]);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const messagesEndRef = useRef(null);
   const typingTimers = useRef({});
@@ -40,11 +51,14 @@ export default function useChatSession({
 
     if (!roomId || !isTypingRef.current || !user?.username) return;
 
-    sendMessage({
-      type: "STOP_TYPING",
-      roomId,
-      senderUsername: user.username,
-    });
+    try {
+      sendMessage({
+        type: "STOP_TYPING",
+        roomId,
+      });
+    } catch {
+      // Typing events are best-effort only.
+    }
 
     isTypingRef.current = false;
   };
@@ -52,6 +66,23 @@ export default function useChatSession({
   useEffect(() => {
     stopTypingRef.current = stopTyping;
   });
+
+  const toggleMessageSelection = (message) => {
+    const messageId = String(message?.id ?? "");
+
+    if (!messageId) return;
+
+    setSelectedMessages((prev) =>
+      prev.includes(messageId)
+        ? prev.filter((id) => id !== messageId)
+        : [...prev, messageId],
+    );
+  };
+
+  const clearSelection = () => {
+    setSelectedMessages([]);
+    setShowDeleteModal(false);
+  };
 
   useEffect(() => {
     let isCancelled = false;
@@ -61,47 +92,66 @@ export default function useChatSession({
     if (!activeRoom) return undefined;
 
     const loadRoomTimeline = async () => {
-      try {
-        const [textHistoryResult, fileHistoryResult] = await Promise.allSettled([
-          api.get(`/api/messages/${activeRoom.id}`),
-          api.get(`/api/files/history/${activeRoom.id}`),
-        ]);
+      const [textHistoryResult, fileHistoryResult] = await Promise.allSettled([
+        api.get(`/api/messages/${activeRoom.id}`),
+        api.get(`/api/files/history/${activeRoom.id}`),
+      ]);
 
-        if (isCancelled) return;
+      if (isCancelled) return;
 
-        const textHistory =
-          textHistoryResult.status === "fulfilled"
-            ? (textHistoryResult.value.data ?? []).map(normalizeTextHistoryMessage)
-            : [];
+      const anyForbidden = [textHistoryResult, fileHistoryResult].some(
+        (result) =>
+          result.status === "rejected" && isForbiddenError(result.reason),
+      );
 
-        const fileHistory =
-          fileHistoryResult.status === "fulfilled"
-            ? (fileHistoryResult.value.data ?? []).map(normalizeFileMessage)
-            : [];
-
-        if (textHistoryResult.status === "rejected") {
-          console.error("Failed to load text history:", textHistoryResult.reason);
-        }
-
-        if (fileHistoryResult.status === "rejected") {
-          console.error("Failed to load file history:", fileHistoryResult.reason);
-        }
-
-        const timeline = mergeTimelineMessages(
-          textHistory,
-          fileHistory
-        );
-
-        setMessages(timeline);
-      } catch (error) {
-        if (isCancelled) return;
-
-        console.error("Failed to load room timeline:", error);
+      if (anyForbidden) {
         setMessages([]);
+        setChatError("You no longer have access to this room.");
+        return;
+      }
+
+      const textHistory =
+        textHistoryResult.status === "fulfilled"
+          ? (textHistoryResult.value.data ?? []).map(
+              normalizeTextHistoryMessage,
+            )
+          : [];
+
+      const fileHistory =
+        fileHistoryResult.status === "fulfilled"
+          ? (fileHistoryResult.value.data ?? []).map(normalizeFileMessage)
+          : [];
+
+      if (textHistoryResult.status === "rejected") {
+        console.error("Failed to load text history:", textHistoryResult.reason);
+      }
+
+      if (fileHistoryResult.status === "rejected") {
+        console.error("Failed to load file history:", fileHistoryResult.reason);
+      }
+
+      const timeline = mergeTimelineMessages(textHistory, fileHistory);
+      setMessages((currentMessages) =>
+        mergeTimelineMessages(currentMessages, timeline),
+      );
+      setChatError("");
+
+      if (
+        textHistoryResult.status === "rejected" ||
+        fileHistoryResult.status === "rejected"
+      ) {
+        setChatError("Some room content could not be loaded completely.");
       }
     };
 
-    loadRoomTimeline();
+    loadRoomTimeline().catch((error) => {
+      if (isCancelled) return;
+
+      setMessages([]);
+      setChatError(
+        getApiErrorMessage(error, "Could not load this conversation."),
+      );
+    });
 
     connectSocket(
       token,
@@ -121,7 +171,6 @@ export default function useChatSession({
             });
 
             const key = `${message.roomId}_${message.senderUsername}`;
-
             clearTimeout(typingTimers.current[key]);
 
             typingTimers.current[key] = setTimeout(() => {
@@ -163,8 +212,14 @@ export default function useChatSession({
         onFileMessage: (message) => {
           addMessage(normalizeFileMessage(message));
         },
+        onDeleteMessage: (event) => {
+          applyDeleteEvent?.(event);
+        },
+        onError: (message) => {
+          setChatError(message);
+        },
       },
-      activeRoom.id
+      activeRoom.id,
     );
 
     return () => {
@@ -173,22 +228,32 @@ export default function useChatSession({
       clearTimeout(localTypingTimer.current);
       disconnectSocket();
     };
-  }, [activeRoom, token, user?.username, setMessages, addMessage]);
+  }, [
+    activeRoom,
+    token,
+    user?.username,
+    setMessages,
+    addMessage,
+    applyDeleteEvent,
+  ]);
 
   const handleInputChange = (value) => {
     setInput(value);
+    setChatError("");
 
     if (!activeRoom || !user?.username) return;
     if (!value.trim() && !isTypingRef.current) return;
 
-    sendMessage({
-      type: "TYPING",
-      roomId: activeRoom.id,
-      senderUsername: user.username,
-    });
+    try {
+      sendMessage({
+        type: "TYPING",
+        roomId: activeRoom.id,
+      });
+    } catch {
+      // Typing events are best-effort only.
+    }
 
     isTypingRef.current = true;
-
     clearTimeout(localTypingTimer.current);
 
     localTypingTimer.current = setTimeout(() => {
@@ -201,6 +266,7 @@ export default function useChatSession({
 
     setSelectedFile(file);
     setUploadError("");
+    setChatError("");
   };
 
   const removeSelectedFile = () => {
@@ -217,7 +283,6 @@ export default function useChatSession({
     const formData = new FormData();
     formData.append("file", selectedFile);
     formData.append("chatRoomId", activeRoom.id);
-    formData.append("sender", user.username);
 
     if (fileCaption.trim()) {
       formData.append("caption", fileCaption.trim());
@@ -225,16 +290,16 @@ export default function useChatSession({
 
     setIsUploading(true);
     setUploadError("");
+    setChatError("");
 
     try {
       await api.post("/api/files/upload", formData);
       setSelectedFile(null);
       setFileCaption("");
     } catch (error) {
-      const message =
-        error?.response?.data?.error ?? "Upload failed. Please try again.";
-
-      setUploadError(message);
+      setUploadError(
+        getApiErrorMessage(error, "Upload failed. Please try again."),
+      );
     } finally {
       setIsUploading(false);
     }
@@ -243,16 +308,58 @@ export default function useChatSession({
   const sendCurrentMessage = () => {
     if (!input.trim() || !activeRoom || !user?.username) return;
 
-    sendMessage({
-      type: "CHAT",
-      roomId: activeRoom.id,
-      senderUsername: user.username,
-      content: input.trim(),
-      sentAt: new Date().toISOString(),
-    });
+    try {
+      sendMessage({
+        type: "CHAT",
+        roomId: activeRoom.id,
+        content: input.trim(),
+        sentAt: new Date().toISOString(),
+      });
 
-    stopTyping(activeRoom.id);
-    setInput("");
+      stopTyping(activeRoom.id);
+      setInput("");
+      setChatError("");
+    } catch (error) {
+      setChatError(error?.message ?? "Could not send your message.");
+    }
+  };
+
+  const selectedMessagesDetails = useMemo(
+    () =>
+      (messages ?? []).filter((message) =>
+        selectedMessages.includes(String(message?.id ?? "")),
+      ),
+    [messages, selectedMessages],
+  );
+
+  const canDeleteSelectedForEveryone =
+    selectedMessagesDetails.length > 0 &&
+    selectedMessagesDetails.every(
+      (message) => message.senderUsername === user?.username,
+    );
+
+  const deleteSelectedMessages = async (deleteType) => {
+    if (!activeRoom || selectedMessages.length === 0) return;
+
+    if (deleteType === "FOR_EVERYONE" && !canDeleteSelectedForEveryone) {
+      setChatError("You can only delete your own text messages for everyone.");
+      return;
+    }
+
+    try {
+      await api.post("/api/messages/delete", {
+        messageIds: selectedMessages,
+        deleteType,
+        chatRoomId: activeRoom.id,
+      });
+
+      clearSelection();
+      setChatError("");
+    } catch (error) {
+      setChatError(
+        getApiErrorMessage(error, "Could not delete the selected messages."),
+      );
+    }
   };
 
   const currentTypers = activeRoom
@@ -275,11 +382,19 @@ export default function useChatSession({
     fileCaption,
     isUploading,
     uploadError,
+    chatError,
     handleInputChange,
     handleFileSelect,
     setFileCaption,
     removeSelectedFile,
     uploadSelectedFile,
     sendCurrentMessage,
+    selectedMessages,
+    showDeleteModal,
+    setShowDeleteModal,
+    toggleMessageSelection,
+    clearSelection,
+    deleteSelectedMessages,
+    canDeleteSelectedForEveryone,
   };
 }

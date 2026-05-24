@@ -3,6 +3,8 @@ package com.chat.backend.model;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Represents a file/media message sent in a chat.
@@ -35,7 +37,7 @@ public class FileMessage {
 
     /**
      * Stored filename on disk (UUID-based to avoid collisions).
-     * e.g.  "3f2a1b4c-…-invoice.pdf"
+     * e.g. "3f2a1b4c-…-invoice.pdf"
      */
     @Column(nullable = false)
     private String storedFileName;
@@ -48,10 +50,6 @@ public class FileMessage {
     @Column(nullable = false)
     private Long fileSize;
 
-    /**
-     * High-level category used by the frontend to pick the right renderer.
-     * One of: IMAGE | DOCUMENT | ZIP | OTHER
-     */
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     private FileCategory fileCategory;
@@ -62,6 +60,18 @@ public class FileMessage {
 
     @Column(nullable = false)
     private LocalDateTime sentAt;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean deletedForEveryone = false;
+
+    @Column
+    private LocalDateTime deletedAt;
+
+    @Builder.Default
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "file_message_deleted_by", joinColumns = @JoinColumn(name = "file_message_id"))
+    @Column(name = "username")
+    private Set<String> deletedBy = new HashSet<>();
 
     @PrePersist
     protected void onCreate() {
@@ -75,5 +85,14 @@ public class FileMessage {
         DOCUMENT,
         ZIP,
         OTHER
+    }
+
+    public boolean isDeletedForUser(String username) {
+        return deletedForEveryone || deletedBy.contains(username);
+    }
+
+    public boolean canDeleteForEveryone(String requestingUser) {
+        return sender != null
+                && sender.equals(requestingUser);
     }
 }

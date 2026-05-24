@@ -22,10 +22,35 @@ const useChatStore = create((set, get) => ({
 
   setRooms: (rooms) => set({ rooms }),
   setActiveRoom: (room) => set({ activeRoom: room, messages: [] }),
-  setMessages: (messages) => set({ messages: sortAndDeduplicateMessages(messages) }),
+  setMessages: (messagesOrUpdater) => set((state) => ({
+    messages: sortAndDeduplicateMessages(
+      typeof messagesOrUpdater === 'function'
+        ? messagesOrUpdater(state.messages || [])
+        : messagesOrUpdater
+    )
+  })),
   addMessage: (message) => set((state) => ({
     messages: sortAndDeduplicateMessages([...(state.messages || []), message])
   })),
+
+  applyDeleteEvent: (event) =>
+  set((state) => ({
+    messages: (state.messages || []).filter((message) => {
+      const id = String(
+        message?.attachment?.id ??
+        message?.id ??
+        ""
+      );
+
+      if (!event.messageIds.includes(id)) {
+        return true;
+      }
+
+      return false;
+    }),
+    
+  })),
+
 }))
 
 export default useChatStore

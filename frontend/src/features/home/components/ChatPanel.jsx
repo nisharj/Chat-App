@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { FaEnvelope } from "react-icons/fa";
 import {
   HiArchiveBox,
@@ -9,10 +10,64 @@ import {
   HiUserGroup,
   HiXMark,
 } from "react-icons/hi2";
-import { formatFileSize, resolveFileUrl } from "../../../utils/chatMessages";
+import api, { getApiErrorMessage } from "../../../services/api";
+import { formatFileSize } from "../../../utils/chatMessages";
 
 const FILE_INPUT_ACCEPT =
   "image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.tar,.gz,.7z,.rar";
+
+function ProtectedImagePreview({ attachment, onMissing }) {
+  const [imageSrc, setImageSrc] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = "";
+
+    const loadImage = async () => {
+      try {
+        const response = await api.get(attachment?.downloadUrl, {
+          responseType: "blob",
+        });
+
+        if (cancelled) return;
+
+        objectUrl = URL.createObjectURL(response.data);
+        setImageSrc(objectUrl);
+      } catch {
+        if (!cancelled) {
+          onMissing?.();
+        }
+      }
+    };
+
+    loadImage();
+
+    return () => {
+      cancelled = true;
+
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [attachment?.downloadUrl, onMissing]);
+
+  if (!imageSrc) {
+    return (
+      <div className="flex h-48 items-center justify-center rounded-xl border border-black/5 bg-white text-sm text-slate-500">
+        Loading image...
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={imageSrc}
+      alt={attachment?.originalFileName ?? "Uploaded image"}
+      className="max-h-80 w-full object-cover"
+      loading="lazy"
+    />
+  );
+}
 
 export default function ChatPanel({
   user,
@@ -31,8 +86,19 @@ export default function ChatPanel({
   onFileCaptionChange,
   onRemoveFile,
   onUploadFile,
+  selectedMessages = [],
+  showDeleteModal = false,
+  setShowDeleteModal = () => {},
+  toggleMessageSelection = () => {},
+  clearSelection = () => {},
+  deleteSelectedMessages = () => {},
+  canDeleteSelectedForEveryone = false,
+  chatError = "",
   onOpenSidebar,
 }) {
+  const [missingFiles, setMissingFiles] = useState({});
+  const [localError, setLocalError] = useState("");
+
   const formatTime = (sentAt) => {
     if (!sentAt) return "";
 
@@ -91,29 +157,113 @@ export default function ChatPanel({
     }
   };
 
+  const markFileAsMissing = (messageKey) => {
+    setMissingFiles((prev) => ({
+      ...prev,
+      [messageKey]: true,
+    }));
+  };
+
+  const openProtectedFile = async (attachment, messageKey) => {
+    try {
+      const response = await api.get(attachment?.downloadUrl, {
+        responseType: "blob",
+      });
+
+      const objectUrl = URL.createObjectURL(response.data);
+      const fileName = attachment?.originalFileName ?? "download";
+      const isInlineFriendly =
+        attachment?.fileCategory === "IMAGE" ||
+        attachment?.contentType === "application/pdf";
+
+      if (isInlineFriendly) {
+        const openedWindow = window.open(
+          objectUrl,
+          "_blank",
+          "noopener,noreferrer",
+        );
+
+        if (!openedWindow) {
+          const fallbackLink = document.createElement("a");
+          fallbackLink.href = objectUrl;
+          fallbackLink.download = fileName;
+          document.body.appendChild(fallbackLink);
+          fallbackLink.click();
+          fallbackLink.remove();
+        }
+      } else {
+        const downloadLink = document.createElement("a");
+        downloadLink.href = objectUrl;
+        downloadLink.download = fileName;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        downloadLink.remove();
+      }
+
+      window.setTimeout(() => {
+        URL.revokeObjectURL(objectUrl);
+      }, 60000);
+    } catch (error) {
+      console.error("Failed to open protected file:", error);
+      markFileAsMissing(messageKey);
+      setLocalError(getApiErrorMessage(error, "Could not open this file."));
+    }
+  };
+
   const renderFileMessage = (message, isOwn) => {
     const attachment = message.attachment;
-    const fileUrl = resolveFileUrl(attachment?.downloadUrl);
-    const { icon: AttachmentIcon, label } = getAttachmentPresentation(attachment);
+    const { icon: AttachmentIcon, label } =
+      getAttachmentPresentation(attachment);
     const isImage = attachment?.fileCategory === "IMAGE";
-    const metaTextClass = isOwn ? "text-slate-500" : "text-slate-500";
+    const metaTextClass = "text-slate-500";
+    const hasError = Boolean(missingFiles[message.clientKey]);
 
     if (isImage) {
+      if (hasError) {
+        return (
+          <div className="space-y-1">
+            <div className="flex h-10 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-sm font-medium text-red-600">
+              Image not available
+            </div>
+
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-slate-900">
+                  {attachment?.originalFileName}
+                </div>
+                <div className={`mt-1 text-xs ${metaTextClass}`}>
+                  {label} | {formatFileSize(attachment?.fileSize)}
+                </div>
+                {attachment?.caption && (
+                  <p className="mt-2 break-words text-sm leading-relaxed text-slate-700">
+                    {attachment.caption}
+                  </p>
+                )}
+              </div>
+
+              <span className={`shrink-0 text-xs ${metaTextClass}`}>
+                {formatTime(message.sentAt)}
+              </span>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="space-y-3">
-          <a
-            href={fileUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="block overflow-hidden rounded-xl border border-black/5 bg-white"
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              openProtectedFile(attachment, message.clientKey);
+            }}
+            className="block w-full overflow-hidden rounded-xl border border-black/5 bg-white text-left"
           >
-            <img
-              src={fileUrl}
-              alt={attachment?.originalFileName ?? "Uploaded image"}
-              className="max-h-80 w-full object-cover"
-              loading="lazy"
+            <ProtectedImagePreview
+              attachment={attachment}
+              onMissing={() => markFileAsMissing(message.clientKey)}
             />
-          </a>
+          </button>
 
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
@@ -124,7 +274,7 @@ export default function ChatPanel({
                 {label} | {formatFileSize(attachment?.fileSize)}
               </div>
               {attachment?.caption && (
-                <p className="mt-2 text-sm leading-relaxed text-slate-700 break-words">
+                <p className="mt-2 break-words text-sm leading-relaxed text-slate-700">
                   {attachment.caption}
                 </p>
               )}
@@ -138,12 +288,28 @@ export default function ChatPanel({
       );
     }
 
+    if (hasError) {
+      return (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+            File not available
+          </div>
+
+          <div className={`text-right text-xs ${metaTextClass}`}>
+            {formatTime(message.sentAt)}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-3">
         <div className="flex items-start gap-3">
           <div
             className={`mt-1 rounded-lg p-2 ${
-              isOwn ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-700"
+              isOwn
+                ? "bg-blue-100 text-blue-700"
+                : "bg-slate-100 text-slate-700"
             }`}
           >
             <AttachmentIcon className="text-lg" />
@@ -157,21 +323,23 @@ export default function ChatPanel({
               {label} | {formatFileSize(attachment?.fileSize)}
             </div>
             {attachment?.caption && (
-              <p className="mt-2 text-sm leading-relaxed text-slate-700 break-words">
+              <p className="mt-2 break-words text-sm leading-relaxed text-slate-700">
                 {attachment.caption}
               </p>
             )}
           </div>
 
-          <a
-            href={fileUrl}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              openProtectedFile(attachment, message.clientKey);
+            }}
             className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
           >
             <HiArrowDownTray className="text-sm" />
             Open
-          </a>
+          </button>
         </div>
 
         <div className={`text-right text-xs ${metaTextClass}`}>
@@ -183,11 +351,11 @@ export default function ChatPanel({
 
   const renderTextMessage = (message) => (
     <div className="flex items-end gap-2">
-      <p className="text-sm leading-relaxed break-words flex-1">
+      <p className="flex-1 break-words text-sm leading-relaxed">
         {message.content}
       </p>
 
-      <span className="text-xs text-gray-100 whitespace-nowrap self-end">
+      <span className="self-end whitespace-nowrap text-xs text-gray-100">
         {formatTime(message.sentAt)}
       </span>
     </div>
@@ -218,7 +386,9 @@ export default function ChatPanel({
 
           <div className="min-w-0 flex-1">
             <div className="text-base font-bold text-slate-900">ChatApp</div>
-            <div className="text-sm text-slate-500">Select a room to start chatting</div>
+            <div className="text-sm text-slate-500">
+              Select a room to start chatting
+            </div>
           </div>
         </div>
 
@@ -241,7 +411,7 @@ export default function ChatPanel({
           <HiBars3 className="text-xl" />
         </button>
 
-        <div className="min-w-0 flex-1 truncate font-bold text-base">
+        <div className="min-w-0 flex-1 truncate text-base font-bold">
           {activeRoom.group ? (
             <>
               <HiUserGroup className="mr-2 inline" />
@@ -256,25 +426,73 @@ export default function ChatPanel({
         </div>
       </div>
 
+      {(chatError || localError) && (
+        <div className="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700 sm:px-6">
+          {chatError || localError}
+        </div>
+      )}
+
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto bg-gray-50 p-4 sm:p-6">
+        {selectedMessages.length > 0 && (
+          <div className="flex items-center justify-between border-b border-red-200 bg-red-50 px-4 py-3 sm:px-6">
+            <span className="text-sm font-medium text-red-700">
+              {selectedMessages.length} selected
+            </span>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowDeleteModal(true)}
+                className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                Delete
+              </button>
+
+              <button
+                onClick={clearSelection}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {(messages || []).map((message) => {
           const isOwn = message.senderUsername === user?.username;
+          const messageId = String(message?.id ?? "");
+          const isSelected = selectedMessages.includes(messageId);
           const isTextMessage = message.kind === "text";
+          const isSelectable = Boolean(messageId);
 
           return (
             <div
               key={message.clientKey}
-              className={`max-w-[88%] sm:max-w-[75%] ${isOwn ? "self-end" : "self-start"}`}
+              className={`max-w-[88%] sm:max-w-[75%] ${
+                isOwn ? "self-end" : "self-start"
+              }`}
             >
               <div
+                onContextMenu={(event) => {
+                  if (!isSelectable) return;
+
+                  event.preventDefault();
+                  toggleMessageSelection(message);
+                }}
+                onClick={() => {
+                  if (isSelectable && selectedMessages.length > 0) {
+                    toggleMessageSelection(message);
+                  }
+                }}
                 className={`rounded-2xl px-4 py-3 shadow-sm ${
+                  isSelectable ? "cursor-pointer" : ""
+                } ${isSelected ? "ring-2 ring-red-500" : ""} ${
                   isTextMessage
                     ? isOwn
                       ? "bg-blue-600 text-white"
                       : "bg-[#1f1f1f] text-white"
                     : isOwn
-                      ? "bg-blue-50 text-slate-900 border border-blue-100"
-                      : "bg-white text-slate-900 border border-gray-200"
+                      ? "border border-blue-100 bg-blue-50 text-slate-900"
+                      : "border border-gray-200 bg-white text-slate-900"
                 }`}
               >
                 {!isOwn && activeRoom.group && (
@@ -299,7 +517,9 @@ export default function ChatPanel({
       </div>
 
       {typingLabel && (
-        <div className="px-4 py-2 text-sm text-gray-500 sm:px-6">{typingLabel}</div>
+        <div className="px-4 py-2 text-sm text-gray-500 sm:px-6">
+          {typingLabel}
+        </div>
       )}
 
       {selectedFile && (
@@ -391,6 +611,44 @@ export default function ChatPanel({
           Send
         </button>
       </div>
+
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-slate-900">
+              Delete Messages
+            </h3>
+
+            <p className="mt-2 text-sm text-slate-600">
+              Choose how you want to delete the selected messages.
+            </p>
+
+            <div className="mt-6 space-y-3">
+              <button
+                onClick={() => deleteSelectedMessages("FOR_ME")}
+                className="w-full rounded-lg bg-slate-900 px-4 py-3 text-white"
+              >
+                Delete for Me
+              </button>
+
+              <button
+                onClick={() => deleteSelectedMessages("FOR_EVERYONE")}
+                disabled={!canDeleteSelectedForEveryone}
+                className="w-full rounded-lg bg-red-600 px-4 py-3 text-white disabled:cursor-not-allowed disabled:bg-red-300"
+              >
+                Delete for Everyone
+              </button>
+
+              <button
+                onClick={clearSelection}
+                className="w-full rounded-lg border px-4 py-3"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

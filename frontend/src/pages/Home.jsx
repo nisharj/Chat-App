@@ -17,6 +17,7 @@ function RoomChatPanel({
   messages,
   setMessages,
   addMessage,
+  applyDeleteEvent,
   onOpenSidebar,
 }) {
   const chatSession = useChatSession({
@@ -26,6 +27,7 @@ function RoomChatPanel({
     messages,
     setMessages,
     addMessage,
+    applyDeleteEvent,
   });
 
   return (
@@ -47,6 +49,15 @@ function RoomChatPanel({
       onRemoveFile={chatSession.removeSelectedFile}
       onUploadFile={chatSession.uploadSelectedFile}
       onOpenSidebar={onOpenSidebar}
+
+      selectedMessages={chatSession.selectedMessages}
+      showDeleteModal={chatSession.showDeleteModal}
+      setShowDeleteModal={chatSession.setShowDeleteModal}
+      toggleMessageSelection={chatSession.toggleMessageSelection}
+      clearSelection={chatSession.clearSelection}
+      deleteSelectedMessages={chatSession.deleteSelectedMessages}
+      canDeleteSelectedForEveryone={chatSession.canDeleteSelectedForEveryone}
+      chatError={chatSession.chatError}
     />
   );
 }
@@ -63,6 +74,7 @@ export default function Home() {
     messages,
     setMessages,
     addMessage,
+    applyDeleteEvent,
   } = useChatStore();
 
   const navigate = useNavigate();
@@ -82,7 +94,7 @@ export default function Home() {
 
     const ping = () =>
       api
-        .post(`/api/presence/online?username=${user.username}`)
+        .post("/api/presence/online")
         .catch(() => {});
 
     ping();
@@ -180,6 +192,7 @@ export default function Home() {
           messages={messages}
           setMessages={setMessages}
           addMessage={addMessage}
+          applyDeleteEvent={applyDeleteEvent}
           onOpenSidebar={handleOpenSidebar}
         />
       </div>

@@ -16,18 +16,28 @@ const compareMessages = (left, right) => {
     return timeDifference;
   }
 
-  return String(left?.clientKey ?? "").localeCompare(String(right?.clientKey ?? ""));
+  return String(left?.clientKey ?? "").localeCompare(
+    String(right?.clientKey ?? ""),
+  );
 };
 
 const buildTextFallbackKey = ({ roomId, senderUsername, sentAt, content }) =>
   `text:${roomId ?? "unknown"}:${senderUsername ?? "unknown"}:${sentAt ?? "unknown"}:${content ?? ""}`;
 
-const buildFileFallbackKey = ({ roomId, senderUsername, sentAt, downloadUrl }) =>
+const buildFileFallbackKey = ({
+  roomId,
+  senderUsername,
+  sentAt,
+  downloadUrl,
+}) =>
   `file:${roomId ?? "unknown"}:${senderUsername ?? "unknown"}:${sentAt ?? "unknown"}:${downloadUrl ?? ""}`;
 
 export const normalizeTextHistoryMessage = (message) => {
-  const roomId = message?.room?.id ? String(message.room.id) : String(message?.roomId ?? "");
-  const senderUsername = message?.sender?.username ?? message?.senderUsername ?? "Unknown";
+  const roomId = message?.room?.id
+    ? String(message.room.id)
+    : String(message?.roomId ?? "");
+  const senderUsername =
+    message?.sender?.username ?? message?.senderUsername ?? "Unknown";
   const sentAt = message?.sentAt ?? null;
   const content = message?.content ?? "";
 
@@ -35,6 +45,7 @@ export const normalizeTextHistoryMessage = (message) => {
     clientKey: message?.id
       ? `text:${message.id}`
       : buildTextFallbackKey({ roomId, senderUsername, sentAt, content }),
+    id: message?.id ?? null,
     kind: "text",
     roomId,
     senderUsername,
@@ -51,7 +62,10 @@ export const normalizeTextSocketMessage = (message) => {
   const content = message?.content ?? "";
 
   return {
-    clientKey: buildTextFallbackKey({ roomId, senderUsername, sentAt, content }),
+    clientKey: message?.id
+      ? `text:${message.id}`
+      : buildTextFallbackKey({ roomId, senderUsername, sentAt, content }),
+    id: message?.id ?? null,
     kind: "text",
     roomId,
     senderUsername,
@@ -63,7 +77,8 @@ export const normalizeTextSocketMessage = (message) => {
 
 export const normalizeFileMessage = (message) => {
   const roomId = String(message?.chatRoomId ?? message?.roomId ?? "");
-  const senderUsername = message?.sender ?? message?.senderUsername ?? "Unknown";
+  const senderUsername =
+    message?.sender ?? message?.senderUsername ?? "Unknown";
   const sentAt = message?.sentAt ?? null;
   const caption = message?.caption ?? "";
   const downloadUrl = message?.downloadUrl ?? "";
@@ -72,6 +87,7 @@ export const normalizeFileMessage = (message) => {
     clientKey: message?.id
       ? `file:${message.id}`
       : buildFileFallbackKey({ roomId, senderUsername, sentAt, downloadUrl }),
+    id: message?.id ?? null,
     kind: "file",
     roomId,
     senderUsername,
@@ -116,7 +132,9 @@ export const resolveFileUrl = (downloadUrl) => {
   if (ABSOLUTE_URL_PATTERN.test(downloadUrl)) return downloadUrl;
 
   const baseUrl = String(api.defaults.baseURL ?? "").replace(/\/$/, "");
-  const normalizedPath = downloadUrl.startsWith("/") ? downloadUrl : `/${downloadUrl}`;
+  const normalizedPath = downloadUrl.startsWith("/")
+    ? downloadUrl
+    : `/${downloadUrl}`;
 
   return `${baseUrl}${normalizedPath}`;
 };

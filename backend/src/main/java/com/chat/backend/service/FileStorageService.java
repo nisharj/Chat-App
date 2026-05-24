@@ -12,6 +12,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.nio.file.*;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
@@ -39,8 +40,7 @@ public class FileStorageService {
             "application/x-tar",
             "application/gzip",
             "application/x-7z-compressed",
-            "application/x-rar-compressed"
-    );
+            "application/x-rar-compressed");
 
     /** 20 MB default — override via application.properties */
     private static final long MAX_FILE_SIZE = 20 * 1024 * 1024;
@@ -67,9 +67,9 @@ public class FileStorageService {
     public String store(MultipartFile file) {
         validate(file);
 
-        String original  = StringUtils.cleanPath(file.getOriginalFilename());
+        String original = cleanOriginalFilename(file.getOriginalFilename());
         String extension = getExtension(original);
-        String stored    = UUID.randomUUID() + (extension.isEmpty() ? "" : "." + extension);
+        String stored = UUID.randomUUID() + (extension.isEmpty() ? "" : "." + extension);
 
         try {
             Path target = uploadDir.resolve(stored);
@@ -98,24 +98,43 @@ public class FileStorageService {
     }
 
     /**
+     * Removes a stored file from disk if it still exists.
+     */
+    public void delete(String storedFileName) {
+        try {
+            Path filePath = uploadDir.resolve(storedFileName).normalize();
+            Files.deleteIfExists(filePath);
+        } catch (IOException ex) {
+            throw new RuntimeException("Failed to delete file " + storedFileName, ex);
+        }
+    }
+
+    /**
      * Determines the high-level {@link FileCategory} from a MIME type.
      */
     public FileCategory categorize(String contentType) {
-        if (contentType == null) return FileCategory.OTHER;
-        if (contentType.startsWith("image/"))           return FileCategory.IMAGE;
+        if (contentType == null)
+            return FileCategory.OTHER;
+        if (contentType.startsWith("image/"))
+            return FileCategory.IMAGE;
         if (contentType.contains("zip")
                 || contentType.contains("tar")
                 || contentType.contains("gzip")
                 || contentType.contains("7z")
-                || contentType.contains("rar"))             return FileCategory.ZIP;
+                || contentType.contains("rar"))
+            return FileCategory.ZIP;
         if (contentType.startsWith("application/")
-                || contentType.startsWith("text/"))         return FileCategory.DOCUMENT;
+                || contentType.startsWith("text/"))
+            return FileCategory.DOCUMENT;
         return FileCategory.OTHER;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void validate(MultipartFile file) {
+        if (file == null) {
+            throw new IllegalArgumentException("Uploaded file is required.");
+        }
         if (file.isEmpty()) {
             throw new IllegalArgumentException("Uploaded file is empty.");
         }
@@ -124,16 +143,24 @@ public class FileStorageService {
                     "File too large. Maximum allowed size is 20 MB.");
         }
         String ct = file.getContentType();
-        if (ct == null || !ALLOWED_TYPES.contains(ct.toLowerCase())) {
+        if (ct == null || !ALLOWED_TYPES.contains(ct.toLowerCase(Locale.ROOT))) {
             throw new IllegalArgumentException(
                     "File type not allowed: " + ct +
                             ". Allowed: images, PDFs, Office docs, plain text, zip/tar/gz archives.");
         }
-        String name = StringUtils.cleanPath(file.getOriginalFilename());
+        String name = cleanOriginalFilename(file.getOriginalFilename());
         if (name.contains("..")) {
             throw new IllegalArgumentException(
                     "Invalid filename (path traversal detected): " + name);
         }
+    }
+
+    private static String cleanOriginalFilename(String originalFilename) {
+        if (originalFilename == null || originalFilename.isBlank()) {
+            throw new IllegalArgumentException("Original filename is required.");
+        }
+
+        return StringUtils.cleanPath(originalFilename);
     }
 
     private static String getExtension(String filename) {
@@ -141,4 +168,3 @@ public class FileStorageService {
         return (dot >= 0) ? filename.substring(dot + 1).toLowerCase() : "";
     }
 }
-

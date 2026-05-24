@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
 
 @Data
 @Entity
@@ -22,9 +24,34 @@ public class Message {
     @JoinColumn(name = "user_id", nullable = false)
     private User sender;
 
-    @Column(nullable = false)
+    @Column
     private String content;
 
     private LocalDateTime sentAt = LocalDateTime.now();
     private boolean isRead = false;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean deletedForEveryone = false;
+
+
+    @Column
+    private LocalDateTime deletedAt;
+
+    public boolean isDeletedForUser(String username) {
+        return deletedForEveryone || deletedBy.contains(username);
+    }
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(
+            name="message_deleted_by",
+            joinColumns = @JoinColumn(name = "message_id")
+    )
+    @Column(name="username")
+    private Set<String> deletedBy = new HashSet<>();
+
+    public boolean canDeleteForEveryone(String requestingUser) {
+        return sender != null
+                && sender.getUsername() != null
+                && sender.getUsername().equals(requestingUser);
+    }
 }

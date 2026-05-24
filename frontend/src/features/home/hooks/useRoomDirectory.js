@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import api from "../../../services/api";
+import api, { getApiErrorMessage } from "../../../services/api";
+
+const deduplicateRooms = (rooms) =>
+  (rooms ?? []).filter(
+    (room, index, allRooms) => index === allRooms.findIndex((item) => item.id === room.id),
+  );
 
 export default function useRoomDirectory({
   user,
@@ -9,164 +14,193 @@ export default function useRoomDirectory({
   setActiveRoom,
   setMessages,
 }) {
-  // ── Local State ──────────────────────────────────────────────────────────
   const [newRoom, setNewRoom] = useState("");
   const [users, setUsers] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState({});
+  const [directoryError, setDirectoryError] = useState("");
 
-  // ── Load Users ───────────────────────────────────────────────────────────
   useEffect(() => {
-    api.get("/api/users").then((res) => {
-      setUsers(res.data);
-    });
-  }, []);
+    if (!user) return undefined;
 
-  // ── Load Rooms ───────────────────────────────────────────────────────────
-  useEffect(() => {
-    const fetchRooms = async() => {
-        try{
-            const res = await api.get("/api/rooms");
-            const unique = res.data.filter(
-                (room, index, self) =>
-                index === self.findIndex((r) => r.id === room.id)
-            );
-            setRooms(unique);
-        }
-        catch(err){
-            console.error("Failed to fetch rooms:", err);
-        }
+    let ignore = false;
+
+    const loadUsers = async () => {
+      try {
+        const response = await api.get("/api/users");
+        if (ignore) return;
+
+        setUsers(response.data ?? []);
+      } catch (error) {
+        if (ignore) return;
+        setDirectoryError(
+          getApiErrorMessage(error, "Could not load the user directory."),
+        );
+      }
     };
-    
-    fetchRooms();
-  }, [setRooms]);
 
-  // ── Poll Online Presence Every 15 Seconds ────────────────────────────────
+    loadUsers();
+
+    return () => {
+      ignore = true;
+    };
+  }, [user]);
+
   useEffect(() => {
-    if (users.length === 0) return;
+    if (!user) return undefined;
+
+    let ignore = false;
+
+    const fetchRooms = async () => {
+      try {
+        const response = await api.get("/api/rooms");
+        if (ignore) return;
+
+        const uniqueRooms = deduplicateRooms(response.data);
+        setRooms(uniqueRooms);
+        setDirectoryError("");
+      } catch (error) {
+        if (ignore) return;
+        setDirectoryError(
+          getApiErrorMessage(error, "Could not load your rooms."),
+        );
+      }
+    };
+
+    fetchRooms();
+
+    return () => {
+      ignore = true;
+    };
+  }, [user, setRooms]);
+
+  useEffect(() => {
+    if (!activeRoom) return;
+
+    if (!(rooms ?? []).some((room) => room.id === activeRoom.id)) {
+      setActiveRoom(null);
+      setMessages([]);
+    }
+  }, [activeRoom, rooms, setActiveRoom, setMessages]);
+
+  useEffect(() => {
+    if (users.length === 0) return undefined;
+
+    let ignore = false;
 
     const fetchPresence = async () => {
       const results = await Promise.all(
-        users.map(async (u) => {
+        users.map(async (directoryUser) => {
           try {
-            const res = await api.get(`/api/presence/${u.username}`);
+            const response = await api.get(`/api/presence/${directoryUser.username}`);
             return {
-              username: u.username,
-              online: res.data,
+              username: directoryUser.username,
+              online: response.data,
             };
-          } 
-          catch {
-            return { username: u.username, online: false };
+          } catch {
+            return { username: directoryUser.username, online: false };
           }
-        })
+        }),
       );
+
+      if (ignore) return;
 
       setOnlineUsers(
         Object.fromEntries(
-          results.map(({ username, online }) => [username, online])
-        )
+          results.map(({ username, online }) => [username, online]),
+        ),
       );
     };
 
     fetchPresence();
-
     const interval = setInterval(fetchPresence, 10000);
 
-    return () => clearInterval(interval);
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
   }, [users]);
 
-  // ── Create Room ──────────────────────────────────────────────────────────
-    const createRoom = async() => {
-        if(!newRoom.trim()) return;
+  const createRoom = async () => {
+    const trimmedName = newRoom.trim();
+    if (!trimmedName) return;
 
-        try{
-            const res = await api.post(`/api/rooms?name=${encodeURIComponent(newRoom)}&isGroup=true`);
+    try {
+      const response = await api.post("/api/rooms", null, {
+        params: {
+          name: trimmedName,
+          isGroup: true,
+        },
+      });
 
-            {/* setRooms((prev) => {
-                if(prev.some((room) => room.id === res.data.id)){ return prev; }
-                return [...prev, res.data];
-             }); */}
-
-            const alreadyExists = rooms.some((r) => r.id === res.data.id);
-            if(!alreadyExists) setRooms([...rooms, res.data]);
-
-            setNewRoom("");
-        }
-        catch(err){
-            console.error("Failed to create room:", err);
-        }
+      const updatedRooms = deduplicateRooms([...(rooms ?? []), response.data]);
+      setRooms(updatedRooms);
+      setNewRoom("");
+      setDirectoryError("");
+    } catch (error) {
+      setDirectoryError(
+        getApiErrorMessage(error, "Could not create the room."),
+      );
     }
+  };
 
-  // ── Delete Room ──────────────────────────────────────────────────────────
-    const deleteRoom = async (roomId) => {
-        if (!window.confirm("Delete this room and all its messages?")) return;
+  const deleteRoom = async (roomId) => {
+    if (!window.confirm("Delete this room and all its messages?")) return;
 
-        try {
-            await api.delete(`/api/rooms/${roomId}`);
+    try {
+      await api.delete(`/api/rooms/${roomId}`);
 
-            const updatedRooms =  rooms.filter((room) => room.id !== roomId);
-            setRooms(updatedRooms);
+      const updatedRooms = (rooms ?? []).filter((room) => room.id !== roomId);
+      setRooms(updatedRooms);
+      setDirectoryError("");
 
-            if (activeRoom?.id === roomId) {
-                setActiveRoom(null);
-                setMessages([]);
-                
-                // const nextRoom = updatedRooms[0] ?? null;
-                // setActiveRoom(nextRoom);
-                // if (!nextRoom) {
-                //     setMessages([]);
-                // }
-            }
-        } 
-        catch (err) {
-            console.error("Failed to delete room:", err);
-        }
-    };
+      if (activeRoom?.id === roomId) {
+        setActiveRoom(null);
+        setMessages([]);
+      }
+    } catch (error) {
+      setDirectoryError(
+        getApiErrorMessage(error, "Could not delete the room."),
+      );
+    }
+  };
 
-  // ── Open Direct Message ──────────────────────────────────────────────────
-    const openDirectMessage = async (targetUsername) => {
-        if (targetUsername === user?.username) return;
+  const openDirectMessage = async (targetUsername) => {
+    if (!targetUsername || targetUsername === user?.username) return;
 
-        try{
-            const res = await api.post(
-            `/api/rooms/direct?user1=${user.username}&user2=${targetUsername}`
-            );
-        
-            {/*
-            setRooms((prev) =>
-            prev.find((room) => room.id === res.data.id)
-                ? prev
-                : [...prev, res.data]
-            );
-            */}
+    try {
+      const response = await api.post("/api/rooms/direct", null, {
+        params: { targetUsername },
+      });
 
-            const alreadyExists = rooms.some((r) => r.id === res.data.id);
-            if(!alreadyExists) setRooms([...rooms, res.data]);
-        
-            setActiveRoom(res.data);
-        }
-        catch(err){
-            console.error("Failed to open DM:", err);
-        }
-    };
+      const updatedRooms = deduplicateRooms([...(rooms ?? []), response.data]);
+      setRooms(updatedRooms);
+      setActiveRoom(response.data);
+      setDirectoryError("");
+    } catch (error) {
+      setDirectoryError(
+        getApiErrorMessage(error, "Could not open that direct message."),
+      );
+    }
+  };
 
-  // ── Derived State ────────────────────────────────────────────────────────
-    const groupRooms = Array.isArray(rooms)
-        ? rooms.filter((room) => room.group)
-        : [];
+  const groupRooms = Array.isArray(rooms)
+    ? rooms.filter((room) => room.group)
+    : [];
 
-    const dmRooms = Array.isArray(rooms)
-        ? rooms.filter((room) => !room.group)
-        : [];
+  const dmRooms = Array.isArray(rooms)
+    ? rooms.filter((room) => !room.group)
+    : [];
 
-    return {
-        newRoom,
-        setNewRoom,
-        users,
-        onlineUsers,
-        groupRooms,
-        dmRooms,
-        createRoom,
-        deleteRoom,
-        openDirectMessage,
-    };
+  return {
+    newRoom,
+    setNewRoom,
+    users,
+    onlineUsers,
+    groupRooms,
+    dmRooms,
+    directoryError,
+    createRoom,
+    deleteRoom,
+    openDirectMessage,
+  };
 }
